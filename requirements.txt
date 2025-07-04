@@ -1,0 +1,7 @@
+# core
+chromadb==1.0.15
+langchain-ollama==0.3.3
+
+# dev
+jupyter==1.1.1
+black==25.1.0
