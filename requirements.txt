@@ -1,6 +1,9 @@
 # core
 chromadb==1.0.15
+langchain==0.3.26
 langchain-ollama==0.3.3
+pypdf==5.7.0
+streamlit==1.46.1
 
 # dev
 jupyter==1.1.1
