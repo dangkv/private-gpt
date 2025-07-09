@@ -1,8 +1,5 @@
 import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage
-
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
 from src.pipeline.rag_pipeline import RAGPipeline
 
 # App config
@@ -64,13 +61,8 @@ def load_rag_pipeline():
     """Load RAG pipeline (cached for performance)"""
     return RAGPipeline()
 
-def get_response(user_query, chat_history, rag:RAGPipeline):
-
-    result = rag.query_stream(user_query)
-
-    return result["answer_stream"]
-
 def render_message(role: str, content: str):
+    """Render a message bubble"""
     bubble_class = "user-bubble" if role == "user" else "assistant-bubble"
     st.markdown(
         f"""
@@ -99,36 +91,49 @@ try:
 
 except Exception as e:
     st.error(f"Failed to initialize RAG system: {e}")
+    st.stop()
 
-# Render past messages with dark bubbles
-st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-# Display past messages, one flex row per message
+# Display chat history
 for msg in st.session_state.chat_history:
-
     if isinstance(msg, HumanMessage):
         render_message("user", msg.content)
     elif isinstance(msg, AIMessage):
         render_message("assistant", msg.content)
 
-st.markdown('</div>', unsafe_allow_html=True)
-
 # User input
 user_query = st.chat_input("Type your message here...")
 if user_query:
+    # Add user message to chat history
     st.session_state.chat_history.append(HumanMessage(content=user_query))
-
-    st.markdown(
-        f'<div class="chat-container"><div class="bubble user-bubble">{user_query}</div></div>',
-        unsafe_allow_html=True
-    )
-
-    full_response = ""
-    with st.empty():
-        for chunk in get_response(user_query, st.session_state.chat_history, rag):
+    
+    # Display user message
+    render_message("user", user_query)
+    
+    # Generate and stream assistant response
+    try:
+        # Get streaming response with chat history
+        result = rag.query_stream(user_query, st.session_state.chat_history)
+        
+        # Create placeholder for streaming content
+        response_placeholder = st.empty()
+        full_response = ""
+        
+        # Stream the response
+        for chunk in result["answer_stream"]:
             full_response += chunk
-            st.markdown(
-                f'<div class="chat-container"><div class="bubble assistant-bubble">{full_response}</div></div>',
+            response_placeholder.markdown(
+                f"""
+                <div class="chat-container">
+                    <div class="bubble assistant-bubble">{full_response}</div>
+                </div>
+                """,
                 unsafe_allow_html=True
             )
-
-    st.session_state.chat_history.append(AIMessage(content=full_response))
+        
+        # Add assistant response to chat history
+        st.session_state.chat_history.append(AIMessage(content=full_response))
+        
+    except Exception as e:
+        error_msg = f"Error generating response: {str(e)}"
+        render_message("assistant", error_msg)
+        st.session_state.chat_history.append(AIMessage(content=error_msg))

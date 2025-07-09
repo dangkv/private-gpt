@@ -1,118 +1,85 @@
 from typing import List, Dict, Any, Iterator, Optional, Callable
 import logging
 
-from langchain.llms import Ollama
-from langchain.prompts import PromptTemplate
+from langchain_ollama import ChatOllama
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 from langchain.schema import Document
-from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain.callbacks.base import BaseCallbackHandler
+from langchain_core.messages import HumanMessage, AIMessage
 
 from config import LLM_MODEL, OLLAMA_BASE_URL
 
 logger = logging.getLogger(__name__)
 
 
-class CustomStreamingCallbackHandler(BaseCallbackHandler):
-    """Custom callback handler for streaming responses"""
-    
-    def __init__(self, callback_fn: Optional[Callable[[str], None]] = None):
-        self.callback_fn = callback_fn
-        self.tokens = []
-    
-    def on_llm_new_token(self, token: str, **kwargs) -> None:
-        """Called when a new token is generated"""
-        self.tokens.append(token)
-        if self.callback_fn:
-            self.callback_fn(token)
-    
-    def get_full_response(self) -> str:
-        """Get the complete response"""
-        return "".join(self.tokens)
-
-
 class ResponseGeneration:
-    """Handles response generation using LLM with context from retrieved documents"""
+    """Handles response generation using LLM with context from retrieved documents and chat history"""
     
     def __init__(self):
-        self.llm = Ollama(
+        self.llm = ChatOllama(
             model=LLM_MODEL,
             base_url=OLLAMA_BASE_URL
         )
+        self.output_parser = StrOutputParser()
         
-        # RAG prompt template
-        self.prompt_template = PromptTemplate(
-            input_variables=["context", "question"],
-            template="""You are a helpful assistance. that answers questions based on the provided context.
+        # RAG prompt template with chat history
+        self.prompt_template = ChatPromptTemplate.from_template("""You are a helpful assistant that answers questions based on the provided context and chat history.
 
 Context:
 {context}
 
-Question: {question}
+Chat History:
+{chat_history}
+
+Current Question: {question}
 
 Instructions:
-- Answer the question based on the context provided
+- Answer the question based on the context provided and previous conversation
 - If the context doesn't contain enough information to answer the question, say so
 - Be concise and accurate
 - Cite specific information from the context when relevant
-- Reply to human social conversations
-- If the question and the context are unrelated, specify that is not clear
-- Format the answers so that it easy to read. Indents, point forms or spacings
+- Reply to human social conversations naturally
+- If the question and the context are unrelated, specify that it's not clear
+- Format the answers so that they are easy to read. Use indents, point forms or spacings
 - Encourage the use of Emojis if it helps with answer clarity
+- Consider the chat history to provide contextual responses
 
-Answer:"""
-        )
+Answer:""")
     
-    def generate_response(self, query: str, relevant_docs: List[Document]) -> str:
-        """Generate response using retrieved documents (non-streaming)"""
-        try:
-            # Combine relevant documents into context
-            context = "\n\n".join([doc.page_content for doc in relevant_docs])
-            
-            # Format prompt
-            prompt = self.prompt_template.format(
-                context=context,
-                question=query
-            )
-            
-            # Generate response
-            response = self.llm(prompt)
-            
-            logger.info("Response generated successfully")
-            return response.strip()
-            
-        except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            return f"I apologize, but I encountered an error while generating a response: {str(e)}"
+    def _format_chat_history(self, chat_history: List) -> str:
+        """Format chat history for inclusion in prompt"""
+        if not chat_history:
+            return "No previous conversation."
+        
+        formatted_history = []
+        for message in chat_history[-10:]:  # Keep last 10 messages to avoid token limit
+            if isinstance(message, HumanMessage):
+                formatted_history.append(f"Human: {message.content}")
+            elif isinstance(message, AIMessage):
+                formatted_history.append(f"Assistant: {message.content}")
+        
+        return "\n".join(formatted_history)
     
     def generate_response_stream(self, query: str, relevant_docs: List[Document], 
-                               callback_fn: Optional[Callable[[str], None]] = None) -> Iterator[str]:
-        """Generate streaming response using retrieved documents"""
+                               chat_history: List = None) -> Iterator[str]:
+        """Generate streaming response using retrieved documents and chat history"""
         try:
             # Combine relevant documents into context
             context = "\n\n".join([doc.page_content for doc in relevant_docs])
             
-            # Format prompt
-            prompt = self.prompt_template.format(
-                context=context,
-                question=query
-            )
+            # Format chat history
+            formatted_history = self._format_chat_history(chat_history or [])
             
-            # Create streaming callback handler
-            streaming_handler = CustomStreamingCallbackHandler(callback_fn)
+            # Create the chain
+            chain = self.prompt_template | self.llm | self.output_parser
             
-            # Create LLM with streaming enabled
-            streaming_llm = Ollama(
-                model=LLM_MODEL,
-                base_url=OLLAMA_BASE_URL,
-                callbacks=[streaming_handler]
-            )
-            
-            # Generate response with streaming
-            streaming_llm(prompt)
-            
-            # Yield tokens as they come
-            for token in streaming_handler.tokens:
-                yield token
+            # Stream the response
+            for chunk in chain.stream({
+                "context": context,
+                "question": query,
+                "chat_history": formatted_history
+            }):
+                yield chunk
                 
             logger.info("Streaming response generated successfully")
             

@@ -86,7 +86,7 @@ ollama pull mistral
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/privateGPT.git
+git clone https://github.com/dangkv/privateGPT.git
 cd privateGPT
 
 # Create virtual environment
@@ -316,7 +316,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **🎉 Ready to chat with your documents privately?**
 
-[Get Started](#-installation) • [View Demo](https://demo.privategpt.com) • [Join Community](https://discord.gg/privategpt)
+[Get Started](#-installation)
 
 Made with ❤️ by the PrivateGPT Team
 

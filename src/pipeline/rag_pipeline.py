@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List, Iterator
 
 from src.ingestion import DocumentIngestion
 from src.retrieval import DocumentRetrieval
@@ -8,7 +8,7 @@ from src.generation import ResponseGeneration
 logger = logging.getLogger(__name__)
 
 class RAGPipeline:
-    """Main RAG pipeline orchestrator"""
+    """Main RAG pipeline orchestrator with streaming support and chat history"""
     
     def __init__(self):
         self.ingestion = DocumentIngestion()
@@ -20,60 +20,13 @@ class RAGPipeline:
         logger.info("Starting document ingestion...")
         return self.ingestion.process_and_store()
     
-    def query(self, question: str, k: int = 5) -> Dict[str, Any]:
+    def query_stream(self, question: str, chat_history: List = None, k: int = 5) -> Dict[str, Any]:
         """
-        Main query interface for the RAG system
+        Main streaming query interface for the RAG system with chat history
         
         Args:
             question: User's question
-            k: Number of documents to retrieve
-            
-        Returns:
-            Dictionary containing answer and metadata
-        """
-        try:
-            # Retrieve relevant documents
-            relevant_docs = self.retrieval.retrieve_documents(question, k=k)
-            
-            if not relevant_docs:
-                return {
-                    "answer": "I couldn't find any relevant information to answer your question.",
-                    "sources": [],
-                    "num_sources": 0
-                }
-            
-            # Generate response
-            answer = self.generation.generate_response(question, relevant_docs)
-            
-            # Extract source information
-            sources = []
-            for doc in relevant_docs:
-                source_info = {
-                    "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
-                    "metadata": doc.metadata
-                }
-                sources.append(source_info)
-            
-            return {
-                "answer": answer,
-                "sources": sources,
-                "num_sources": len(sources)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in RAG pipeline: {e}")
-            return {
-                "answer": f"I encountered an error while processing your question: {str(e)}",
-                "sources": [],
-                "num_sources": 0
-            }
-
-    def query_stream(self, question: str, k: int = 5) -> Dict[str, Any]:
-        """
-        Streaming query interface for the RAG system
-        
-        Args:
-            question: User's question
+            chat_history: List of previous messages
             k: Number of documents to retrieve
             
         Returns:
@@ -93,8 +46,12 @@ class RAGPipeline:
                     "num_sources": 0
                 }
             
-            # Generate streaming response
-            answer_stream = self.generation.generate_response_stream(question, relevant_docs)
+            # Generate streaming response with chat history
+            answer_stream = self.generation.generate_response_stream(
+                question, 
+                relevant_docs, 
+                chat_history=chat_history
+            )
             
             # Extract source information
             sources = []
@@ -137,7 +94,7 @@ class RAGPipeline:
                 status["retrieval"] = True
             
             # Check generation
-            test_response = self.generation.llm("Test")
+            test_response = list(self.generation.generate_response_stream("Test", [], []))
             if test_response:
                 status["generation"] = True
                 
