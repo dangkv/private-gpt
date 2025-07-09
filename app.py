@@ -3,7 +3,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama.llms import OllamaLLM
+from src.pipeline.rag_pipeline import RAGPipeline
 
 # App config
 st.set_page_config(page_title="Streamlit Chatbot", page_icon="🤖")
@@ -59,21 +59,16 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-def get_response(user_query, chat_history):
-    template = """
-    You are a helpful assistant. Answer the following questions considering the history of the conversation:
+@st.cache_resource
+def load_rag_pipeline():
+    """Load RAG pipeline (cached for performance)"""
+    return RAGPipeline()
 
-    Chat history: {chat_history}
+def get_response(user_query, chat_history, rag:RAGPipeline):
 
-    User question: {user_question}
-    """
-    prompt = ChatPromptTemplate.from_template(template)
-    model = OllamaLLM(model="mistral")
-    chain = prompt | model | StrOutputParser()
-    return chain.stream({
-        "chat_history": chat_history,
-        "user_question": user_query,
-    })
+    result = rag.query_stream(user_query)
+
+    return result["answer_stream"]
 
 def render_message(role: str, content: str):
     bubble_class = "user-bubble" if role == "user" else "assistant-bubble"
@@ -91,6 +86,19 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
         AIMessage(content="Hello, I am a bot. How can I help you?")
     ]
+
+# Load RAG pipeline
+try:
+    rag = load_rag_pipeline()
+    
+    # Health check
+    health = rag.health_check()
+    if not health["retrieval"]:
+        st.error("⚠️ Vector store not initialized. Please run document ingestion first.")
+        st.code("python scripts/ingest_documents.py")
+
+except Exception as e:
+    st.error(f"Failed to initialize RAG system: {e}")
 
 # Render past messages with dark bubbles
 st.markdown('<div class="chat-container">', unsafe_allow_html=True)
@@ -116,7 +124,7 @@ if user_query:
 
     full_response = ""
     with st.empty():
-        for chunk in get_response(user_query, st.session_state.chat_history):
+        for chunk in get_response(user_query, st.session_state.chat_history, rag):
             full_response += chunk
             st.markdown(
                 f'<div class="chat-container"><div class="bubble assistant-bubble">{full_response}</div></div>',
